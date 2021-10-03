@@ -116,8 +116,10 @@
         <label class="checkbox">
           <input type="checkbox" data-bind="checked: pwm_temperature_linked"> {{ _('Link PWM to Temperature') }}
         </label>
-        <span class="help-inline">Link PWM ouput to temperature. PWM output will be interpolated between the point from duty A, temperature A -> duty
-          B, temperature B. This output will automatically start when a print starts and will default to the default
+        <span class="help-inline">Link PWM ouput to temperature. PWM output will be controlled by a PI feedback loop 
+		using the temperature error (setpoint - current temp) to control the duty cycle. Use proportional gain (P Gain)
+		and integral gain (I Gain) to tune the PI controller.
+		This output will automatically start when a print starts and will default to the default
           duty cycle when print is complete.
         </span>
       </div>
@@ -126,25 +128,25 @@
 
     <!-- ko if: ($data.output_type() == "pwm" && $data.pwm_temperature_linked()) -->
     <div class="control-group">
-      <label class="control-label">{{ _('Duty A') }}</label>
+      <label class="control-label">{{ _('P Gain') }}</label>
       <div class="controls">
         <input type="text" class="input-block-level" data-bind="value: duty_a">
       </div>
     </div>
     <div class="control-group">
-      <label class="control-label">{{ _('Temperature A') }}</label>
+      <label class="control-label">{{ _('Temperature Setpoint') }}</label>
       <div class="controls">
         <input type="text" class="input-block-level" data-bind="value: temperature_a">
       </div>
     </div>
     <div class="control-group">
-      <label class="control-label">{{ _('Duty B') }}</label>
+      <label class="control-label">{{ _('I Gain') }}</label>
       <div class="controls">
         <input type="text" class="input-block-level" data-bind="value: duty_b">
       </div>
     </div>
     <div class="control-group">
-      <label class="control-label">{{ _('Temperature B') }}</label>
+      <label class="control-label">{{ _('Not Used') }}</label>
       <div class="controls">
         <input type="text" class="input-block-level" data-bind="value: temperature_b">
       </div>

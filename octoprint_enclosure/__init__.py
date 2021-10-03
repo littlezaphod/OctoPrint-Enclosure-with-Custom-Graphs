@@ -21,6 +21,7 @@ import inspect
 import threading
 import json
 import copy
+from simple_pid import PID
 
 
 #Function that returns Boolean output state of the GPIO inputs / outputs
@@ -75,7 +76,7 @@ class EnclosurePlugin(octoprint.plugin.StartupPlugin, octoprint.plugin.TemplateP
         Function to start timer that checks enclosure temperature
         """
 
-        self._check_temp_timer = RepeatedTimer(10, self.check_enclosure_temp, None, None, True)
+        self._check_temp_timer = RepeatedTimer(1, self.check_enclosure_temp, None, None, True)
         self._check_temp_timer.start()
 
     @staticmethod
@@ -133,6 +134,7 @@ class EnclosurePlugin(octoprint.plugin.StartupPlugin, octoprint.plugin.TemplateP
     # ~~ StartupPlugin mixin
     def on_after_startup(self):
         self.pwm_instances = []
+        self.pid_instances = []
         self.event_queue = []
         self.rpi_outputs_not_changed = []
         self.rpi_outputs = self._settings.get(["rpi_outputs"])
@@ -1037,7 +1039,7 @@ class EnclosurePlugin(octoprint.plugin.StartupPlugin, octoprint.plugin.TemplateP
 
         lines = self.read_raw_18b20_temp(serial_number)
         while lines[0].strip()[-3:] != 'YES':
-            time.sleep(0.2)
+#            time.sleep(0.2)
             lines = self.read_raw_18b20_temp(serial_number)
         equals_pos = lines[1].find('t=')
         if equals_pos != -1:
@@ -1094,30 +1096,62 @@ class EnclosurePlugin(octoprint.plugin.StartupPlugin, octoprint.plugin.TemplateP
             for pwm_output in list(filter(lambda item: item['output_type'] == 'pwm' and item['pwm_temperature_linked'],
                                           self.rpi_outputs)):
                 gpio_pin = self.to_int(pwm_output['gpio_pin'])
-                if self._printer.is_printing():
-                    index_id = self.to_int(pwm_output['index_id'])
-                    linked_id = self.to_int(pwm_output['linked_temp_sensor'])
-                    linked_data = self.get_linked_temp_sensor_data(linked_id)
-                    current_temp = self.to_float(linked_data['temperature'])
+                
+                
+#                if self._printer.is_printing():
+    
+                index_id = self.to_int(pwm_output['index_id'])
+                linked_id = self.to_int(pwm_output['linked_temp_sensor'])
+                linked_data = self.get_linked_temp_sensor_data(linked_id)
+                current_temp = self.to_float(linked_data['temperature'])
 
-                    duty_a = self.to_float(pwm_output['duty_a'])
-                    duty_b = self.to_float(pwm_output['duty_b'])
-                    temp_a = self.to_float(pwm_output['temperature_a'])
-                    temp_b = self.to_float(pwm_output['temperature_b'])
+                duty_a = self.to_float(pwm_output['duty_a'])
+                duty_b = self.to_float(pwm_output['duty_b'])
+                temp_a = self.to_float(pwm_output['temperature_a'])
+                temp_b = self.to_float(pwm_output['temperature_b'])
 
-                    try:
-                        calculated_duty = ((current_temp - temp_a) * (duty_b - duty_a) / (temp_b - temp_a)) + duty_a
+                calculated_duty = 0
+                
+                # PI feedback controller
+                try:      
+                
+                    pidFound = False
+                    
+                    for pid_instance in self.pid_instances:
+                        if gpio_pin in pid_instance:
+                            pid = pid_instance[gpio_pin]
+                            pidFound = True
+                        
+                            pGain = duty_a
+                            iGain = duty_b
+                            dGain = 0
+                            tempSetPoint = temp_a
+                                                        
+                            if pid.tunings != (pGain, iGain, dGain) or pid.setpoint != tempSetPoint:
+                                pid.tunings = (pGain, iGain, dGain)
+                                pid.output_limits = (0, 100)
+                                pid.setpoint = tempSetPoint
+                                pid.reset()
+                                self._logger.info("Reset PID(tunings=%s,setPoint=%s)", pid.tunings, tempSetPoint)
+                                
+                            tempError = tempSetPoint - current_temp
+                            calculated_duty = pid(current_temp)
+            
+                            self._logger.info("PID tunings=%s, setPoint=%s", pid.tunings, tempSetPoint)
+                            self._logger.info("PWM GPIO %s: TErr %s, Duty: %s, components=%s", gpio_pin, tempError, calculated_duty, pid.components)
+            
+                            # elif self.print_complete:
+                            #     calculated_duty = self.to_int(pwm_output['duty_cycle'])
+                            # else:
+                            #     calculated_duty = 0
+                    
+                except Exception as ex:
+                    self.log_error(ex)
+                    self._logger.warn("PID processing error")
 
-                        if current_temp < temp_a:
-                            calculated_duty = 0
-                    except:
-                        calculated_duty = 0
+                if not pidFound:
+                    self._logger.warn("PID %s not found in %s", gpio_pin, pid_instance)
 
-                    self._logger.debug("Calculated duty for PWM %s is %s", index_id, calculated_duty)
-                elif self.print_complete:
-                    calculated_duty = self.to_int(pwm_output['duty_cycle'])
-                else:
-                    calculated_duty = 0
 
                 self.write_pwm(gpio_pin, self.constrain(calculated_duty, 0, 100))
 
@@ -1289,6 +1323,15 @@ class EnclosurePlugin(octoprint.plugin.StartupPlugin, octoprint.plugin.TemplateP
                 self._logger.info("starting PWM on pin %s", pin)
                 pwm_instance.start(0)
                 self.pwm_instances.append({pin: pwm_instance})
+                
+                try:
+                    pid_instance = PID(0.0, 0.0, 0.0, setpoint=0)
+                    self.pid_instances.append({pin: pid_instance})
+                    self._logger.info("Setting up PID instance pin %s", pin)
+                except Exception as ex:
+                    self.log_error(ex)
+
+                
             for gpio_out_neopixel in list(
                     filter(lambda item: item['output_type'] == 'neopixel_direct', self.rpi_outputs)):
                 pin = self.to_int(gpio_out_neopixel['gpio_pin'])
