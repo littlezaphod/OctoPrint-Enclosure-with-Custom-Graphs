@@ -1,3 +1,6 @@
+# Fork modification note:
+This fork implements a PID feedback loop to achieve a more precise enclosure heater control.
+
 # Enclosure Plugin with Support for Custom Graphs
  Ocotoprint allows plugins to define custom temperature values using the ```octoprint.comm.protocol.temperatures.received```-hook.
  
